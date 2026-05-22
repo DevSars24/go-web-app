@@ -1,12 +1,22 @@
+# =============================================================================
+# Helm Template — Service
+# =============================================================================
+
 apiVersion: v1
 kind: Service
 metadata:
   name: go-web-app
+  namespace: webapps
+  labels:
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+
 spec:
-  selector:
-    app: go-web-app
-  ports:
-  - protocol: TCP
-    port: {{ .Values.service.port }}
-    targetPort: 8080
   type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: go-web-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: http

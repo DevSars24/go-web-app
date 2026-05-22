@@ -1,6 +1,56 @@
-apiVersion: v2
+# =============================================================================
+# Helm Chart Metadata — go-web-app
+# =============================================================================
+#
+# Chart.yaml is the identity card of this Helm chart. Helm uses it to display
+# information when you run `helm search` or `helm show chart`, and to enforce
+# version compatibility with the target Kubernetes cluster.
+#
+# Two version numbers — what is the difference?
+#
+#   `version` (chart version):
+#     Tracks changes to the chart itself — the templates and default values.
+#     Bump this number when you change a template or add a new configurable value.
+#     Follows Semantic Versioning (SemVer): MAJOR.MINOR.PATCH
+#       - PATCH: bug fix or comment update (0.1.0 → 0.1.1)
+#       - MINOR: new backwards-compatible feature (0.1.1 → 0.2.0)
+#       - MAJOR: breaking change (0.2.0 → 1.0.0)
+#
+#   `appVersion` (application version):
+#     Tracks the version of the application being packaged.
+#     This is for display only — Helm does not use it for any logic.
+#     The actual Docker image tag comes from values.yaml (image.tag).
+#
+# Example: if the Go app releases v2.0.0 but the chart templates are unchanged,
+# update `appVersion` to "2.0.0" but leave `version` as is.
+# =============================================================================
+
+apiVersion: v2       # v2 = Helm 3 chart format. Do not change this.
 name: go-web-app
-description: A Helm chart for Go Web App
+description: >
+  A production-ready Helm chart for go-web-app — a lightweight Go web server
+  that serves a course catalogue. This chart demonstrates a complete DevOps
+  workflow: Docker, Kubernetes, Helm, GitHub Actions CI/CD, and ArgoCD GitOps.
+
+# `application` means this chart creates real Kubernetes resources.
+# `library` charts contain only shared templates with no resources of their own.
 type: application
-version: 0.1.0
-appVersion: "1.0.0"
+
+version: 0.2.0        # Chart version — bump when templates or values change
+appVersion: "1.0.0"   # Application version — informational only
+
+# Minimum Kubernetes version required to install this chart.
+# This prevents the chart from being installed on a cluster that does not
+# support the API versions used in the templates.
+kubeVersion: ">=1.24.0"
+
+keywords:
+  - go
+  - golang
+  - web-server
+  - devops
+  - kubernetes
+
+maintainers:
+  - name: Saurabh Singh Rajput
+    url: https://github.com/DevSars24

@@ -1,14 +1,58 @@
+# =============================================================================
+# Kubernetes Service — go-web-app
+# =============================================================================
+#
+# A Service gives a stable network address to a group of pods.
+#
+# The problem it solves:
+#   Pods are temporary. When a pod is restarted or replaced during a rolling
+#   update, it gets a new IP address. If other parts of the system connect to
+#   pods directly by IP, those connections break every time a pod is replaced.
+#
+# The solution:
+#   A Service has a fixed IP and DNS name that never changes. It automatically
+#   forwards traffic to whichever pods are currently healthy and running.
+#
+# Traffic flow:
+#
+#   Ingress Controller
+#       │
+#       ▼
+#   Service: go-web-app  (stable IP, port 80)
+#       │
+#       ├──→  Pod 1 (port 8080)
+#       └──→  Pod 2 (port 8080)
+#
+# Service type — ClusterIP:
+#   This Service is only reachable from inside the cluster. It cannot be
+#   accessed directly from the internet. All external traffic enters through
+#   the Ingress resource (see ingress.yaml), which provides more control
+#   over routing, security, and TLS termination.
+# =============================================================================
+
 apiVersion: v1
 kind: Service
+
 metadata:
   name: go-web-app
+  namespace: webapps
   labels:
-    app: go-web-app
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/component: web-server
+
 spec:
-  ports:
-  - port: 80
-    targetPort: 8080
-    protocol: TCP
-  selector:
-    app: go-web-app
   type: ClusterIP
+
+  # The selector finds pods to forward traffic to.
+  # This must match the pod labels in deployment.yaml.
+  # If the labels do not match, the Service has no endpoints and all
+  # requests will time out.
+  selector:
+    app.kubernetes.io/name: go-web-app
+
+  ports:
+    - name: http          # Naming ports is a best practice. The Ingress and
+      protocol: TCP       # probes can then reference the port by name instead
+      port: 80            # of number. If the port number ever changes, you
+      targetPort: http    # only need to update the Deployment, not every
+                          # resource that references it.
