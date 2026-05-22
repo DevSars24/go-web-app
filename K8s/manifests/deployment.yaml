@@ -1,22 +1,155 @@
+# =============================================================================
+# Kubernetes Deployment — go-web-app
+# =============================================================================
+#
+# A Deployment tells Kubernetes how to run your application. It manages:
+#   - How many copies (replicas) of the app to keep running
+#   - How to update the app without downtime (rolling update)
+#   - What to do if a pod crashes (restart it automatically)
+#
+# How a rolling update works:
+#   Kubernetes replaces old pods one at a time. Before removing an old pod,
+#   it starts a new one and waits for it to become healthy. This means the
+#   app stays available throughout the entire update process.
+#
+#   Example with 2 replicas:
+#     Step 1: Start a new pod (now 3 pods running: 2 old + 1 new)
+#     Step 2: Wait for the new pod to pass its readiness probe
+#     Step 3: Remove one old pod (back to 2 pods: 1 old + 1 new)
+#     Step 4: Repeat until all pods are updated
+# =============================================================================
 
 apiVersion: apps/v1
 kind: Deployment
+
 metadata:
   name: go-web-app
+  namespace: webapps   # Deploy to our dedicated namespace, not `default`
+
   labels:
-    app: go-web-app
+    # Standard Kubernetes labels used by dashboards and monitoring tools.
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/component: web-server
+    app.kubernetes.io/part-of: go-web-app
+
 spec:
-  replicas: 1
+  # Run 2 replicas so the app stays available if one pod restarts.
+  # With only 1 replica, any restart (update, crash, node drain) causes a
+  # brief service interruption.
+  replicas: 2
+
+  # Rolling update settings.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxSurge: allow 1 extra pod above the desired count during an update.
+      # This means we briefly run 3 pods (2 old + 1 new) while updating.
+      maxSurge: 1
+      # maxUnavailable: do not remove any old pods until the new pod is ready.
+      # Combined with maxSurge=1, this gives true zero-downtime deployments.
+      maxUnavailable: 0
+
+  # The Deployment uses this selector to find the pods it manages.
+  # This must match the labels in the pod template below.
   selector:
     matchLabels:
-      app: go-web-app
+      app.kubernetes.io/name: go-web-app
+
   template:
     metadata:
       labels:
-        app: go-web-app
+        app.kubernetes.io/name: go-web-app
+        app.kubernetes.io/component: web-server
+
     spec:
+      # Pod-level security settings, applied to all containers in this pod.
+      securityContext:
+        # Do not run containers as the root user.
+        # If a container were compromised, a root process would have far more
+        # access to the host machine than a regular user process.
+        runAsNonRoot: true
+        runAsUser: 65532    # The non-root user provided by the distroless image
+        runAsGroup: 65532
+
+      # When Kubernetes wants to stop a pod (during an update or scale-down),
+      # it sends a SIGTERM signal and waits this many seconds before force-
+      # killing the process. Our server uses a 30-second shutdown timeout,
+      # so these values must match.
+      terminationGracePeriodSeconds: 30
+
       containers:
-      - name: go-web-app
-        image: sars2006/go-web-app:9643168d49fc593b2223798331a41ea2384e4615
-        ports:
-        - containerPort: 8080
+        - name: go-web-app
+
+          # The image tag is updated automatically by the CI/CD pipeline.
+          # It is always a short git SHA (e.g., sha-a1b2c3d) for traceability.
+          # Never use `latest` in production — it is mutable and untraceable.
+          image: sars2006/go-web-app:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http         # Naming the port lets the Service and probes
+              containerPort: 8080  # reference it by name instead of number.
+              protocol: TCP
+
+          # Resource requests and limits.
+          #
+          # requests — the minimum resources Kubernetes guarantees for this pod.
+          #            The scheduler uses this to decide which node to place the
+          #            pod on.
+          # limits   — the maximum resources the container can use.
+          #            If it exceeds the CPU limit, it gets throttled.
+          #            If it exceeds the memory limit, it is restarted.
+          #
+          # Without limits, one misbehaving pod could starve the entire node,
+          # taking down all other applications running on it.
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"      # 50 millicores = 5% of one CPU core
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+
+          # Container-level security settings.
+          securityContext:
+            # Do not allow the process inside the container to gain more
+            # privileges than it started with (e.g., via `sudo`).
+            allowPrivilegeEscalation: false
+            # Remove all Linux kernel capabilities. Our web server does not
+            # need any special capabilities (like binding to port 80).
+            capabilities:
+              drop:
+                - ALL
+            # Make the container's root filesystem read-only. The app cannot
+            # write to its own filesystem, which defeats many common attacks
+            # that rely on writing malicious files to disk.
+            readOnlyRootFilesystem: true
+
+          # Liveness probe — answers the question: "Is this container still running?"
+          #
+          # Kubernetes calls /healthz on a schedule. If it fails three times in
+          # a row, Kubernetes restarts the container. Use this to detect crashes
+          # and deadlocks — not to check external dependencies like a database.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15   # Wait 15s after start before first check
+            periodSeconds: 20         # Check every 20 seconds
+            failureThreshold: 3       # Restart after 3 consecutive failures
+            timeoutSeconds: 5
+
+          # Readiness probe — answers the question: "Is this container ready for traffic?"
+          #
+          # Kubernetes calls /readyz before routing any traffic to a new pod.
+          # If the probe fails, the pod is removed from the load balancer (but
+          # not restarted). This prevents users from hitting a pod that is still
+          # starting up or temporarily overloaded.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5

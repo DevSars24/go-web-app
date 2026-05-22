@@ -1,22 +1,92 @@
+# =============================================================================
+# Helm Template — Deployment
+# =============================================================================
+# This template generates the Kubernetes Deployment manifest.
+# Values wrapped in {{ }} are replaced by Helm at render time using the
+# settings from values.yaml (or any --set / -f overrides you provide).
+#
+# To preview the final YAML without installing anything:
+#   helm template go-web-app ./helm/go-web-app
+# =============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: go-web-app
+  namespace: webapps
   labels:
-    app: go-web-app
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+
 spec:
   replicas: {{ .Values.replicaCount }}
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
   selector:
     matchLabels:
-      app: go-web-app
+      app.kubernetes.io/name: go-web-app
+
   template:
     metadata:
       labels:
-        app: go-web-app
+        app.kubernetes.io/name: go-web-app
+        helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+
+      terminationGracePeriodSeconds: 30
+
       containers:
-      - name: go-web-app
-        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        ports:
-        - containerPort: 8080
+        - name: go-web-app
+          # The image repository and tag come from values.yaml.
+          # The CI/CD pipeline updates the tag on every successful build.
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+
+          resources:
+            requests:
+              memory: {{ .Values.resources.requests.memory | quote }}
+              cpu: {{ .Values.resources.requests.cpu | quote }}
+            limits:
+              memory: {{ .Values.resources.limits.memory | quote }}
+              cpu: {{ .Values.resources.limits.cpu | quote }}
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.livenessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds }}
+
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds }}

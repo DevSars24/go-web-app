@@ -1,14 +1,109 @@
-replicaCount: 1
+# =============================================================================
+# Helm Default Values — go-web-app
+# =============================================================================
+#
+# This file defines all the configurable settings for the Helm chart.
+# Every value here can be overridden without editing this file directly.
+#
+# Override a single value at install time:
+#   helm upgrade --install go-web-app ./helm/go-web-app \
+#     --set image.tag=sha-abc1234
+#
+# Override multiple values using a separate file (recommended for environments):
+#   helm upgrade --install go-web-app ./helm/go-web-app \
+#     -f values-production.yaml
+#
+# Each setting below is documented with what it does and why the default
+# value was chosen.
+# =============================================================================
 
+# Number of pod replicas to run.
+# Use 1 for local development. Use 2 or more in production so the app stays
+# available if one pod is restarted during a rolling update or node failure.
+replicaCount: 2
+
+# Container image settings.
 image:
+  # The Docker Hub repository where the image is stored.
   repository: sars2006/go-web-app
+
+  # The image tag to deploy. In production, the CI/CD pipeline sets this to
+  # a specific git commit SHA (e.g., sha-abc1234) automatically. A specific
+  # tag is important because it is immutable — you always know exactly which
+  # version of the code is running.
+  # Do not use `latest` in production. It changes silently and makes debugging
+  # and rollbacks much harder.
   tag: latest
-  pullPolicy: Always
 
+  # When to pull the image from the registry:
+  #   Always       — pull on every pod start (ensures freshness, but slower)
+  #   IfNotPresent — only pull if the image is not already on the node (recommended
+  #                  when using immutable tags like SHA-based tags)
+  #   Never        — always use the local cache (for air-gapped environments)
+  pullPolicy: IfNotPresent
+
+# Kubernetes Service settings.
 service:
+  # ClusterIP makes the Service reachable only from within the cluster.
+  # External traffic enters through the Ingress. This is the recommended type
+  # for most web applications.
   type: ClusterIP
-  port: 8080
 
+  # The port that the Service listens on inside the cluster.
+  # The Ingress forwards external traffic here, and the Service forwards it to
+  # the container's port 8080.
+  port: 80
+
+# Ingress settings.
 ingress:
+  # Set to false to disable Ingress creation. Useful in local development where
+  # you access the app with `kubectl port-forward` instead.
   enabled: true
+
+  # The hostname used to route traffic to this application.
+  # Replace with your real domain name in production (e.g., app.example.com).
   host: go-web-app.local
+
+  # TLS settings for HTTPS. Requires cert-manager to be installed.
+  tls:
+    enabled: false
+    # When enabled, cert-manager creates a TLS certificate and stores it in a
+    # Secret with this name.
+    # secretName: go-web-app-tls
+
+# Resource requests and limits for each container.
+#
+# requests — the minimum resources Kubernetes guarantees for this container.
+#            The scheduler uses this to find a node with enough free capacity.
+# limits   — the maximum resources the container can consume.
+#            Exceeding the CPU limit causes the container to be throttled.
+#            Exceeding the memory limit causes the container to be restarted.
+#
+# Use `kubectl top pods -n webapps` to monitor actual usage and adjust these
+# values accordingly.
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "50m"      # 50 millicores = 5% of one CPU core
+  limits:
+    memory: "128Mi"
+    cpu: "100m"
+
+# Liveness probe — checks whether the container is still running correctly.
+# If this probe fails three times in a row, Kubernetes restarts the container.
+livenessProbe:
+  path: /healthz
+  initialDelaySeconds: 15   # Wait 15 seconds after container start before checking
+  periodSeconds: 20         # Check every 20 seconds
+  failureThreshold: 3       # Restart after 3 consecutive failures
+  timeoutSeconds: 5         # Fail the check if no response within 5 seconds
+
+# Readiness probe — checks whether the container is ready to receive traffic.
+# If this probe fails, the pod is temporarily removed from the load balancer
+# but is NOT restarted. Kubernetes adds it back once the probe passes again.
+readinessProbe:
+  path: /readyz
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+  timeoutSeconds: 5

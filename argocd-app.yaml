@@ -1,23 +1,93 @@
+# =============================================================================
+# ArgoCD Application — go-web-app
+# =============================================================================
+#
+# This manifest registers the go-web-app with ArgoCD — the GitOps operator
+# that runs inside the Kubernetes cluster.
+#
+# What is GitOps?
+#   GitOps means treating your Git repository as the single source of truth
+#   for the desired state of your Kubernetes cluster. Instead of running
+#   `kubectl apply` or `helm upgrade` manually, you commit a change to Git
+#   and a tool (ArgoCD) automatically applies it to the cluster.
+#
+# How the full pipeline works:
+#
+#   Step 1 — GitHub Actions (CI):
+#     - Runs tests
+#     - Builds and pushes a Docker image with a new SHA tag
+#     - Commits the updated image tag to helm/go-web-app/values.yaml in this repo
+#
+#   Step 2 — ArgoCD (CD):
+#     - Detects the new commit
+#     - Renders the Helm chart with the updated values
+#     - Applies the rendered manifests to the Kubernetes cluster
+#     - Performs a rolling update of the Deployment
+#
+# Benefits over running `kubectl apply` from the pipeline directly:
+#   - The cluster's desired state is always visible in Git (full audit trail)
+#   - Rolling back is a `git revert` — no special tooling needed
+#   - If someone manually changes something in the cluster, ArgoCD
+#     automatically reverts it back to match what Git says (drift correction)
+#   - Cluster credentials never need to leave the cluster
+#
+# How to apply this manifest:
+#   kubectl apply -f argocd-app.yaml
+#   (ArgoCD must already be installed in the `argocd` namespace)
+#
+# Install ArgoCD (if not already installed):
+#   kubectl create namespace argocd
+#   kubectl apply -n argocd -f \
+#     https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# =============================================================================
+
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 
 metadata:
   name: go-web-app
+  # All ArgoCD Application resources must live in the `argocd` namespace,
+  # regardless of where the application itself will be deployed.
   namespace: argocd
 
-spec:
-  project: default
+  # This finalizer tells ArgoCD to delete all the Kubernetes resources it
+  # manages when this Application is deleted (cascade delete). Remove it if
+  # you want to unregister from ArgoCD but keep the running workloads alive.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 
+spec:
+  project: default   # The ArgoCD project this app belongs to.
+
+  # Where is the desired state stored?
   source:
     repoURL: 'https://github.com/DevSars24/go-web-app.git'
-    targetRevision: HEAD
-    path: helm/go-web-app
+    targetRevision: HEAD   # Always track the latest commit on the default branch
+    path: helm/go-web-app  # Path to the Helm chart within the repository
 
+  # Where should ArgoCD deploy the application?
   destination:
+    # Deploy to the same cluster that ArgoCD is running in.
     server: 'https://kubernetes.default.svc'
-    namespace: default
+    namespace: webapps
 
+  # How should ArgoCD reconcile the cluster with Git?
   syncPolicy:
     automated:
+      # prune: delete Kubernetes resources that are no longer defined in Git.
+      # Without this, removing a manifest from Git would leave orphaned
+      # resources running in the cluster indefinitely.
       prune: true
+
+      # selfHeal: if someone manually modifies a resource in the cluster
+      # (bypassing GitOps), ArgoCD automatically reverts it to match Git.
       selfHeal: true
+
+    syncOptions:
+      # Automatically create the `webapps` namespace if it does not exist.
+      # This removes the need to manually apply namespace.yaml before the
+      # first deployment.
+      - CreateNamespace=true
+      # Apply resources using server-side apply, which handles merges more
+      # gracefully and avoids annotation length limits.
+      - ServerSideApply=true

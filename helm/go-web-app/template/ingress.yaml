@@ -1,19 +1,46 @@
+# =============================================================================
+# Helm Template — Ingress
+# =============================================================================
+# The `if .Values.ingress.enabled` block makes Ingress optional.
+# Set `ingress.enabled: false` to skip Ingress creation (e.g., for local dev
+# where you use `kubectl port-forward` instead).
+# =============================================================================
+
+{{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: go-web-app
+  namespace: webapps
+  labels:
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    {{- if .Values.ingress.tls.enabled }}
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    {{- end }}
+
 spec:
   ingressClassName: nginx
+
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host }}
+      secretName: go-web-app-tls
+  {{- end }}
+
   rules:
-  - host: {{ .Values.ingress.host }}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: go-web-app
-            port:
-              number: {{ .Values.service.port }}
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: go-web-app
+                port:
+                  name: http
+{{- end }}

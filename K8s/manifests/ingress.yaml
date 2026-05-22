@@ -1,21 +1,89 @@
+# =============================================================================
+# Kubernetes Ingress — go-web-app
+# =============================================================================
+#
+# An Ingress is an HTTP load balancer that routes external traffic into the
+# cluster based on the hostname and URL path of each request.
+#
+# Why use an Ingress instead of a LoadBalancer Service?
+#   A LoadBalancer Service provisions a cloud load balancer (which costs money)
+#   for each individual service. With an Ingress, one shared load balancer
+#   (the Ingress Controller) handles traffic for all services. Routing rules
+#   are defined here, in cheap YAML files.
+#
+# How traffic reaches the application:
+#
+#   User's browser
+#       │  (DNS resolves go-web-app.local to the load balancer IP)
+#       ▼
+#   Cloud Load Balancer (AWS ALB / GCP LB / etc.)
+#       │
+#       ▼
+#   NGINX Ingress Controller Pod(s)
+#       │  (matches Host header and URL path, forwards to the right Service)
+#       ▼
+#   Service: go-web-app (port 80)
+#       │
+#       ├──→ Pod 1 (port 8080)
+#       └──→ Pod 2 (port 8080)
+#
+# Prerequisite:
+#   The NGINX Ingress Controller must be installed in the cluster before this
+#   resource is applied. Install it with:
+#
+#   helm upgrade --install ingress-nginx ingress-nginx \
+#     --repo https://kubernetes.github.io/ingress-nginx \
+#     --namespace ingress-nginx --create-namespace
+# =============================================================================
+
 apiVersion: networking.k8s.io/v1
 kind: Ingress
+
 metadata:
   name: go-web-app
+  namespace: webapps
   labels:
-    app: go-web-app
+    app.kubernetes.io/name: go-web-app
+    app.kubernetes.io/component: web-server
+
   annotations:
+    # Rewrite the incoming URL path to "/" before forwarding to the backend.
+    # Without this, a request to "/courses" would be forwarded as "/courses",
+    # which the app must be able to handle.
     nginx.ingress.kubernetes.io/rewrite-target: /
+
+    # Limit each client IP to 20 requests per second.
+    # This is a basic defence against accidental or intentional request floods.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+
+    # To enable HTTPS with automatic certificate management (Let's Encrypt):
+    #   1. Install cert-manager: https://cert-manager.io/docs/installation/
+    #   2. Create a ClusterIssuer pointing to Let's Encrypt.
+    #   3. Uncomment the line below and the `tls:` block in the spec.
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
 spec:
+  # ingressClassName tells Kubernetes which Ingress Controller should handle
+  # this Ingress. Always specify this explicitly. The old annotation-based
+  # approach (kubernetes.io/ingress.class) is deprecated.
   ingressClassName: nginx
+
+  # TLS / HTTPS — uncomment to enable encrypted connections.
+  # tls:
+  #   - hosts:
+  #       - go-web-app.local
+  #     secretName: go-web-app-tls   # cert-manager creates this Secret automatically
+
   rules:
-  - host: go-web-app.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: go-web-app
-            port:
-              number: 80
+    - host: go-web-app.local   # Replace with your real domain name in production
+      http:
+        paths:
+          - path: /
+            # Prefix means this rule matches "/" and all paths below it
+            # (e.g., "/home", "/courses", "/about").
+            pathType: Prefix
+            backend:
+              service:
+                name: go-web-app
+                port:
+                  name: http   # Reference by name, not number (best practice)

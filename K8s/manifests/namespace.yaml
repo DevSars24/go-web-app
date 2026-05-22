@@ -1,0 +1,37 @@
+# =============================================================================
+# Kubernetes Namespace — go-web-app
+# =============================================================================
+#
+# A namespace is a way to divide a Kubernetes cluster into separate sections.
+# Each section is isolated from the others. This is useful when multiple teams
+# or applications share the same cluster.
+#
+# Why not use the `default` namespace?
+#   Kubernetes gives you a `default` namespace out of the box. It is fine for
+#   quick experiments, but bad practice for real workloads because:
+#     - Everything ends up mixed together (your app alongside system services)
+#     - You cannot apply access controls (RBAC) per team or application
+#     - You cannot set resource limits per team or application
+#
+# By creating a dedicated `webapps` namespace, you get a clean, isolated space
+# where only the go-web-app resources live.
+#
+# How to apply:
+#   kubectl apply -f K8s/manifests/namespace.yaml
+# =============================================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: webapps
+
+  labels:
+    # A human-readable name for dashboards like Lens or k9s.
+    app.kubernetes.io/name: go-web-app
+
+    # These labels enable Pod Security Admission (PSA), a built-in Kubernetes
+    # feature that enforces security rules on all pods in this namespace.
+    # The "restricted" policy blocks pods from running as root, using host
+    # networking, or mounting sensitive paths.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

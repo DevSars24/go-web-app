@@ -1,22 +1,108 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+# =============================================================================
+# .gitignore — go-web-app
+# =============================================================================
+# This file tells Git which files to ignore. Files listed here will never be
+# committed to the repository, even if they exist on your machine.
 #
-# Binaries for programs and plugins
+# General rule: if a file can be generated from source code, it should not be
+# stored in Git. Only store files that a human wrote.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Compiled Binaries
+# -----------------------------------------------------------------------------
+# Go produces a single binary when you run `go build`. This binary is specific
+# to your operating system and CPU architecture. It has no place in the repo —
+# the CI/CD pipeline always builds a fresh binary from source.
+main
+main.exe
+main.exe~
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# Test binaries produced by `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Go test coverage reports
 *.out
+coverage.html
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
+# -----------------------------------------------------------------------------
+# Go Module Files
+# -----------------------------------------------------------------------------
+# go.work is used for local multi-module development. It should not be committed
+# because it contains paths that only exist on your machine.
 go.work
 go.work.sum
+
+# Uncomment the line below if you use `go mod vendor` to vendor dependencies.
+# vendor/
+
+# -----------------------------------------------------------------------------
+# Secrets and Environment Variables
+# -----------------------------------------------------------------------------
+# Never commit passwords, API keys, or tokens. Use GitHub Actions Secrets for
+# CI/CD and a secrets manager (AWS SSM, HashiCorp Vault) for production.
+.env
+.env.*
+*.env
+secrets/
+.secrets
+
+# -----------------------------------------------------------------------------
+# Docker
+# -----------------------------------------------------------------------------
+# Local overrides to docker-compose should not be committed because they are
+# machine-specific.
+docker-compose.override.yml
+
+# -----------------------------------------------------------------------------
+# Kubernetes and Helm
+# -----------------------------------------------------------------------------
+# Helm downloads chart dependencies into a local `charts/` directory.
+# These are fetched by `helm dependency update` and should not be committed.
+charts/
+*.lock
+
+# Rendered manifests from `helm template` are outputs, not source.
+rendered/
+
+# -----------------------------------------------------------------------------
+# Terraform (for future IaC additions)
+# -----------------------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+
+# -----------------------------------------------------------------------------
+# IDE and Editor Files
+# -----------------------------------------------------------------------------
+# Editor config is personal. Each developer should add their own editor's
+# files to their global gitignore (~/.gitignore_global) instead.
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# -----------------------------------------------------------------------------
+# Operating System Files
+# -----------------------------------------------------------------------------
+.DS_Store       # macOS: Finder folder metadata
+Thumbs.db       # Windows: Explorer thumbnail cache
+desktop.ini     # Windows: folder display settings
+ehthumbs.db
+
+# -----------------------------------------------------------------------------
+# Log Files
+# -----------------------------------------------------------------------------
+*.log
+tmp/
+temp/

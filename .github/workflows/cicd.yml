@@ -1,38 +1,183 @@
+# =============================================================================
+# CI/CD Pipeline — go-web-app
+# GitHub Actions Workflow
+# =============================================================================
+#
+# This pipeline runs automatically whenever code is pushed to the main branch.
+# It has three jobs that run in order:
+#
+#   1. test             — run unit tests and static analysis
+#   2. build-and-push   — build the Docker image and push it to DockerHub
+#   3. update-manifest  — update the image tag in the Helm chart
+#
+# Why this order?
+#   Tests are fast (seconds). Building a Docker image is slow (minutes).
+#   By running tests first, we catch broken code early and avoid wasting
+#   time building an image that will never be deployed.
+#
+# How deployment works (GitOps model):
+#   This pipeline does NOT deploy directly to Kubernetes. Instead:
+#     1. It builds an image and tags it with the git commit SHA.
+#     2. It updates the image tag in helm/go-web-app/values.yaml.
+#     3. ArgoCD watches this repository and automatically syncs the new
+#        image tag to the Kubernetes cluster.
+#
+#   This approach keeps the cluster's desired state visible as code in Git.
+#   Rolling back is as simple as reverting a commit.
+# =============================================================================
+
 name: CI/CD Pipeline
 
+# Run this workflow on every push to main, and on pull requests targeting main.
+# Pull requests only run the `test` job — they do not build or push images.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
+# If two pushes happen in quick succession, cancel the older pipeline run
+# and only process the newest one. This prevents race conditions where an
+# older build could overwrite a newer image tag in the manifest file.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Grant only the permissions this workflow actually needs.
+# `contents: write` is required so the last job can commit back to the repo.
 permissions:
-  contents: write        # ← Ye add karo
+  contents: write
 
 jobs:
-  build:
+  # ===========================================================================
+  # Job 1: test
+  # ===========================================================================
+  # Run quality checks before spending time on Docker builds.
+  # If any check fails, the pipeline stops here.
+  test:
+    name: Test & Lint
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v3
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Build Docker Image
-      run: docker build -t sars2006/go-web-app:${{ github.sha }} .
+      # Set up the same Go version used in go.mod for consistency.
+      # `cache: true` caches downloaded modules between runs, saving time.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.5'
+          cache: true
 
-    - name: Login to DockerHub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      # `go vet` catches common code mistakes that the compiler misses,
+      # such as incorrect format strings and unreachable code.
+      - name: Run static analysis
+        run: go vet ./...
 
-    - name: Push Image to DockerHub
-      run: docker push sars2006/go-web-app:${{ github.sha }}
+      # Run all tests with the race detector enabled.
+      # The race detector finds bugs where two goroutines access shared data
+      # at the same time without proper synchronisation. These bugs are hard
+      # to reproduce manually but can cause random failures in production.
+      - name: Run tests
+        run: go test -race -v -count=1 ./...
 
-    - name: Update K8s Manifest
-      run: |
-        sed -i "s|sars2006/go-web-app:.*|sars2006/go-web-app:${{ github.sha }}|g" \
-        K8s/manifests/deployment.yaml
-        git config user.email "ci@github.com"
-        git config user.name "GitHub Actions"
-        git add K8s/manifests/deployment.yaml
-        git commit -m "Update image tag to ${{ github.sha }}"
-        git push
+  # ===========================================================================
+  # Job 2: build-and-push
+  # ===========================================================================
+  # Build the Docker image and push it to DockerHub.
+  # Only runs after `test` passes, and only on pushes to main (not on PRs).
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Docker Buildx is the modern Docker build engine. It supports
+      # advanced features like build caching and multi-platform images.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to DockerHub using credentials stored in GitHub Secrets.
+      # Secrets are configured in: GitHub repo → Settings → Secrets → Actions.
+      - name: Log in to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Generate image tags. For a push to main, this creates two tags:
+      #   sars2006/go-web-app:latest       — a human-friendly alias
+      #   sars2006/go-web-app:sha-abc1234  — a unique, immutable tag
+      #
+      # We use the SHA tag in Kubernetes manifests so deployments are
+      # always traceable back to a specific commit.
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: sars2006/go-web-app
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      # Build the image and push it to DockerHub.
+      # Build cache is stored in the registry, so unchanged layers are
+      # reused on the next run — reducing build time from ~3 min to ~30 sec.
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=sars2006/go-web-app:buildcache
+          cache-to: type=registry,ref=sars2006/go-web-app:buildcache,mode=max
+
+  # ===========================================================================
+  # Job 3: update-manifest
+  # ===========================================================================
+  # Update the image tag in the Helm values file and push the change back to
+  # the repository. ArgoCD will detect this new commit and deploy the update.
+  #
+  # Why commit back to Git instead of deploying directly?
+  #   This is the GitOps pattern. Every change to the cluster must go through
+  #   a Git commit, giving you a full audit trail: who deployed what, when,
+  #   and from which pipeline run. Rollbacks are just `git revert`.
+  update-manifest:
+    name: Update Helm Values (GitOps)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Replace the `tag:` value in values.yaml with the new commit SHA.
+      - name: Update image tag in Helm values
+        env:
+          NEW_TAG: sha-${{ github.sha }}
+        run: |
+          sed -i "s|tag:.*|tag: ${NEW_TAG:0:14}|g" helm/go-web-app/values.yaml
+
+      # Commit the updated values.yaml. The [skip ci] tag in the commit message
+      # prevents this commit from triggering the pipeline again, which would
+      # create an infinite loop.
+      - name: Commit and push updated tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/go-web-app/values.yaml
+          git commit -m "chore: update image tag to sha-${GITHUB_SHA::7} [skip ci]"
+          git push
