@@ -1,0 +1,14 @@
+replicaCount: 1
+
+image:
+  repository: sars2006/go-web-app
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  host: go-web-app.local
