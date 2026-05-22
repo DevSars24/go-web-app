@@ -17,6 +17,6 @@ spec:
     spec:
       containers:
       - name: go-web-app
-        image: sars2006/go-web-app:298707b9e108979493f51dc84a7a7875658386f9
+        image: sars2006/go-web-app:fc2f125893c8c10004ca30b44f390bf8157a84b5
         ports:
         - containerPort: 8080
