@@ -33,7 +33,7 @@ image:
   # version of the code is running.
   # Do not use `latest` in production. It changes silently and makes debugging
   # and rollbacks much harder.
-  tag: sha-86f4e35cf0
+  tag: sha-2b6580fec7
 
   # When to pull the image from the registry:
   #   Always       — pull on every pod start (ensures freshness, but slower)
